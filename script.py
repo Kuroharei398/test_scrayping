@@ -1,9 +1,14 @@
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select
+from openpyxl import Workbook
+from openpyxl.chart import LineChart , Reference
+from selenium.webdriver.chrome.options import Options
 import time
 
-driver = webdriver.Chrome() #Chrome表示
+options = Options()
+options.add_argument("--headless=new")
+driver = webdriver.Chrome(options=options) #Chrome表示
 driver.get("https://www.data.jma.go.jp/risk/obsdl/index.php")   #該当webサイト表示
 driver.implicitly_wait(3)  #全てのfind_elementで要素が見つかるまで最大3秒待機
 
@@ -54,14 +59,60 @@ Select(pulldown_end_d).select_by_visible_text("31")
 btn_display = driver.find_element(By.CSS_SELECTOR , "#loadTable > img")
 btn_display.click()
 
+#日付・温度を取得
 table_left = driver.find_element(By.CLASS_NAME , "grid-canvas-left")
 table_right = driver.find_element(By.CLASS_NAME , "grid-canvas-right")
 
 dates = table_left.find_elements(By.CLASS_NAME , "slick-cell")
 temps = table_right.find_elements(By.CLASS_NAME , "slick-cell")
 
-for d , t in zip(dates , temps):
-    print(f"{d.text} : {t.text}度")
+#データ整形
+#seleniumで取得したデータを、リスト内方表記を使用して表示されている文字のみを抜き出す
+date_list = [d.text[5:] for d in dates]
+#空文字の場合はNoneを、それ以外の場合はtempsのデータを数値型に変換(excelで使えるデータへ)
+temp_list = [float(t.text) if t.text != "" else None for t in temps]
+
+#Excel作成
+wb = Workbook() #シート1枚のExcelファイル作成
+ws = wb.active  #現在表示しているシートを取得
+ws.title = "2026_01_気温データ"  #シートタイトル
+
+#ヘッダー
+ws.append(["日付", "平均気温"])
+
+# データ書き込み
+for d, t in zip(date_list, temp_list):
+    ws.append([d, t])
+
+# --- グラフ作成 ---
+chart = LineChart() #空の折れ線グラフ作成
+chart.title = "2026年1月 東京 平均気温（℃）" #グラフタイトル
+chart.y_axis.title = None #縦軸のラベル(表示しない)
+chart.x_axis.title = "日付" #横軸のラベル
+
+# データ範囲（2列目が気温）
+data = Reference(ws, min_col=2, min_row=1, max_row=len(temp_list)+1)    #ヘッダー含むB列1行目以降の平均気温を指定
+# 日付（1列目）
+cats = Reference(ws, min_col=1, min_row=2, max_row=len(date_list)+1)    #A列2行目以降の日付を指定
+
+#グラフに平均気温を挿入
+chart.add_data(data, titles_from_data=True)
+
+chart.y_axis.number_format = '0.0"℃"'   #度数表示
+chart.y_axis.majorUnit = 1  #1度間隔
+chart.y_axis.crosses = "min"    #軸を左端固定
+chart.y_axis.delete = False     #数値強制表示
+#横軸へ日付を挿入
+chart.set_categories(cats)
+
+# シートにグラフ追加
+chart.width = 30    #横幅
+chart.height = 23   #高さ
+chart.x_axis.tickLblSkip = 1    #横軸ラベル全表示
+ws.add_chart(chart, "E3")
+
+# 保存
+wb.save("tokyo_temp_202601.xlsx")
 
 #2秒停止
 time.sleep(2)
